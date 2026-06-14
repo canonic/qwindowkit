@@ -114,12 +114,38 @@ if(NOT TARGET qmsetup::library)
     # Import install function
     include("${_source_dir}/cmake/modules/private/InstallPackage.cmake")
 
+    # qm_install_package runs qmsetup as a separate cmake process via
+    # execute_process and does NOT inherit the parent's compiler/linker
+    # config, so anything the sub-build needs must be passed explicitly
+    # through CONFIGURE_ARGS.
+    #
+    # 1. Forward CMAKE_{C,CXX}_COMPILER unconditionally: otherwise the
+    #    sub-cmake guesses, and with LLVM on the search path it can pick
+    #    clang.exe (GNU-like driver) for C and clang-cl.exe (MSVC-like
+    #    driver) for CXX, which CMake refuses to mix.
+    # 2. Under clang-cl on Windows, force link.exe instead of lld-link:
+    #    lld-link rejects qmsetup's duplicate MANIFEST resources (one from
+    #    its .rc, one from CMake's default /MANIFEST:EMBED). link.exe
+    #    silently merges them.
+    set(_qmsetup_configure_args
+        -DCMAKE_INSTALL_LIBDIR=lib
+        "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+        "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+    )
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        list(APPEND _qmsetup_configure_args
+            "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=link"
+            "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=link"
+            "-DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=link"
+        )
+    endif()
+
     # Install package in place
     set(_package_path)
     qm_install_package(qmsetup
         SOURCE_DIR ${_source_dir}
         CMAKE_PACKAGE_SUBDIR lib/cmake/qmsetup
-        CONFIGURE_ARGS -DCMAKE_INSTALL_LIBDIR=lib
+        CONFIGURE_ARGS ${_qmsetup_configure_args}
         BUILD_TYPE Release
         RESULT_PATH _package_path
     )
